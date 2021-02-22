@@ -29,10 +29,7 @@ namespace SynapseInjector
             catch (Exception e)
             {
                 Console.WriteLine(e);
-                Thread.Sleep(100000000);
             }
-
-            Thread.Sleep(2000);
         }
 
         private Program(string path)
@@ -50,7 +47,6 @@ namespace SynapseInjector
             InjectLoader(loadModule, loader);
             StoreModule(loadModule);
             Publicise(loadModule);
-            Console.ReadKey();
         }
 
         private static void Publicise(ModuleDef md)
