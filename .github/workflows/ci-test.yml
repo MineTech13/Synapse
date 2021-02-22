@@ -1,0 +1,110 @@
+name: CI-Test
+  
+on:
+  release:
+    types: [ created ]
+  workflow_dispatch:
+
+env:
+  # Path to the solution file relative to the root of the project.
+  SOLUTION_FILE_PATH: .
+
+  # Configuration type to build.
+  # You can convert this to a build matrix if you need coverage of multiple configuration types.
+  # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+  BUILD_CONFIGURATION: Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      # ${{ steps.getmp.outputs.PATH }}
+      - name: Set Main Path
+        run: echo ("::set-output name=PATH::" + (Get-Item .).FullName)
+        id: getmp
+      - name: Get release
+        id: get_release
+        uses: bruceadams/get-release@v1.2.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1
+      - name: Git Checkout
+        uses: actions/checkout@v2.3.4
+        with:
+          path: repo
+      - name: Restore NuGet packages
+        working-directory: repo
+        run: nuget restore ${{env.SOLUTION_FILE_PATH}}
+      - name: Build KeyPressInjector
+        working-directory: repo
+        run: msbuild /m /t:KeyPressInjector /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      - name: Upload KeyPressInjector Asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: .\repo\KeyPressInjector\bin\Release\KeyPressInjector.exe
+          asset_name: KeyPressInjector.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
+      - name: Build SynapseInjector
+        working-directory: repo
+        run: msbuild /m /t:SynapseInjector /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      - name: Collect SynapseInjector
+        run: Compress-Archive .\repo\SynapseInjector\bin\Release\* .\SynapseInjector.zip
+      - name: Upload SynapseInjector Asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: .\SynapseInjector.zip
+          asset_name: SynapseInjector.zip
+          asset_content_type: application/zip
+      - name: Setup SteamCMD
+        uses: CyberAndrii/setup-steamcmd@v1.1.1
+      - name: Load SCP:SL Serverfiles
+        run: steamcmd +login anonymous +force_install_dir ${{ steps.getmp.outputs.PATH }}\scpsl_serverfiles\ +app_update 996560 validate +quit
+      - name: Inject Synapse to SCP:SL Assembly
+        working-directory: repo\SynapseInjector\bin\Release
+        run: ./SynapseInjector.exe "${{ steps.getmp.outputs.PATH }}\scpsl_serverfiles\SCPSL_Data\Managed\Assembly-CSharp.dll"
+      - name: Copy Refs
+        run: |
+          cp repo\SynapseInjector\bin\Release\Delivery\Assembly-CSharp-Publicized.dll repo\Refs\Assembly-CSharp-Publicized.dll
+          cp repo\SynapseInjector\bin\Release\Delivery\Assembly-CSharp-Publicized.dll repo\Refs\Assembly-CSharp.dll
+      - name: Build Synapse
+        working-directory: repo
+        run: msbuild /m /t:Synapse /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      - name: Collecting Synapse
+        run: |
+          mkdir out\Synapse\dependencies
+          cp repo\SynapseInjector\bin\Release\Delivery\Assembly-CSharp.dll out\
+          cp repo\Synapse\bin\Release\Synapse.dll out\Synapse
+          cp repo\Synapse\bin\Release\0Harmony.dll out\Synapse\dependencies
+          cp repo\Synapse\bin\Release\LiteDB.dll out\Synapse\dependencies
+          cp repo\Synapse\bin\Release\YamlDotNet.dll out\Synapse\dependencies
+          Compress-Archive .\out\* .\Synapse2.zip
+      - name: Upload Synapse Asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: .\Synapse2.zip
+          asset_name: Synapse2.zip
+          asset_content_type: application/zip
+      - name: publish on version change
+        id: publish_nuget
+        uses: rohith/publish-nuget@v2
+        with:
+          PROJECT_FILE_PATH: repo/Synapse/Synapse.csproj
+      - name: Upload Synapse Asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.get_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ${{ steps.publish_nuget.PACKAGE_PATH }}
+          asset_name: ${{ steps.publish_nuget.PACKAGE_NAME }}
+          asset_content_type: application/octet-stream
